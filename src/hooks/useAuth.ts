@@ -1,8 +1,8 @@
 import { useApp } from '../context/AppContext';
-
+ 
 export function useAuth() {
-  const { currentUser, login, logout, switchUser, usersList } = useApp();
-
+  const { currentUser, login, logout, usersList } = useApp();
+ 
   return {
     currentUser,
     isAuthenticated: Boolean(currentUser),
@@ -10,7 +10,7 @@ export function useAuth() {
     isKasir: currentUser?.role === 'kasir',
     login,
     logout,
-    switchUser,
     usersList,
   };
 }
+ 
