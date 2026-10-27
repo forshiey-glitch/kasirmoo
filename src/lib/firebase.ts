@@ -45,10 +45,10 @@ if (isFirebaseConfigured) {
 
     console.log('🔥 Firebase Auth & Firestore berhasil diinisialisasi untuk project:', firebaseConfig.projectId);
   } catch (err) {
-    console.warn('⚠️ Gagal inisialisasi Firebase langsung, beralih ke local fallback:', err);
+    console.error('❌ Gagal inisialisasi Firebase:', err);
   }
 } else {
-  console.info('ℹ️ VITE_FIREBASE_* belum diisi di .env. Mengaktifkan mode demo lokal internal.');
+  console.error('❌ VITE_FIREBASE_* belum diisi di .env. Login tidak akan berfungsi sampai konfigurasi Firebase diisi.');
 }
 
 // Export instances (auth, db, storage)
