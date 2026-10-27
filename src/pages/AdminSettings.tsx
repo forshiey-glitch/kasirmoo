@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { QRISDisplay } from '../components/QRIS/QRISDisplay';
 import { uploadToCloudinary } from '../lib/cloudinary';
@@ -23,13 +23,22 @@ import {
  * ═══════════════════════════════════════════════════════════
  */
 export const AdminSettings: React.FC = () => {
-  const { settings, updateSettings, showToast, syncInitialDataToFirestore } = useApp();
+  const { settings, updateSettings, showToast } = useApp();
 
   const [namaToko, setNamaToko] = useState(settings.nama_toko || 'Restoran LongMen (龍門客棧)');
   const [tagline, setTagline] = useState(settings.tagline || 'Authentic Chinese Tea House & Imperial Dim Sum');
-  const [alamat, setAlamat] = useState(settings.alamat || 'Jl. Surya Kencana No. 88, Kawasan Pecinan Modern');
-  const [telepon, setTelepon] = useState(settings.telepon || '+62 21 8899-7788');
+  const [alamat, setAlamat] = useState(settings.alamat || '');
+  const [telepon, setTelepon] = useState(settings.telepon || '');
   const [ppnPersen, setPpnPersen] = useState<number>(settings.ppn_persen || 0);
+
+  // Sinkronkan form saat data pengaturan dari Firestore selesai dimuat
+  useEffect(() => {
+    setNamaToko(settings.nama_toko || 'Restoran LongMen (龍門客棧)');
+    setTagline(settings.tagline || 'Authentic Chinese Tea House & Imperial Dim Sum');
+    setAlamat(settings.alamat || '');
+    setTelepon(settings.telepon || '');
+    setPpnPersen(settings.ppn_persen || 0);
+  }, [settings]);
 
   const [isUploadingQris, setIsUploadingQris] = useState(false);
   const [qrisUploadProgress, setQrisUploadProgress] = useState<number | null>(null);
@@ -314,20 +323,6 @@ export const AdminSettings: React.FC = () => {
               <p>
                 Setiap kali Anda mengganti gambar QRIS atau menu, dokumen di Firestore langsung terupdate dan disiarkan ke seluruh kasir yang sedang aktif.
               </p>
-            </div>
-
-            <div className="pt-2 border-t border-stone-200 flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div>
-                <p className="font-semibold text-stone-800 text-xs">Inisialisasi Data Awal ke Firestore</p>
-                <p className="text-[11px] text-stone-500">Unggah 15 menu dim sum & pengaturan awal ke database project Firebase baru</p>
-              </div>
-              <button
-                type="button"
-                onClick={syncInitialDataToFirestore}
-                className="w-full sm:w-auto px-4 py-2 rounded-xl bg-[#FAF3E0] hover:bg-[#F2E5C8] text-[#8B0000] border-2 border-[#D4AF37] font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition cursor-pointer"
-              >
-                <span>🏮 Unggah Menu ke Firestore</span>
-              </button>
             </div>
           </div>
         </div>
