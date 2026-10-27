@@ -47,7 +47,9 @@ const MainLayout: React.FC = () => {
       case 'admin-settings':
         return <AdminSettings />;
       default:
-        return <Kasir />;
+        if (currentUser?.role === 'admin') return <AdminDashboard />;
+        if (currentUser?.role === 'kasir') return <Kasir />;
+        return <Login />;
     }
   };
 
