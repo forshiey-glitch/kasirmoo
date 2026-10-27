@@ -1,14 +1,12 @@
 import React, { useState } from 'react';
-import { useAuth } from '../hooks/useAuth';
 import { useApp } from '../context/AppContext';
-import { Lock, Mail, LogIn, Sparkles, AlertCircle, ShieldCheck, User } from 'lucide-react';
+import { Lock, Mail, LogIn, AlertCircle } from 'lucide-react';
 
 export const Login: React.FC = () => {
-  const { login, isFirebaseConfigured } = useApp() as any;
-  const { usersList } = useAuth();
+  const { login, isFirebaseActive } = useApp();
 
-  const [email, setEmail] = useState('kasir1@longmen.com');
-  const [password, setPassword] = useState('password123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -32,11 +30,6 @@ export const Login: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleQuickDemo = (userEmail: string) => {
-    setEmail(userEmail);
-    setPassword('demo123');
   };
 
   return (
@@ -70,6 +63,13 @@ export const Login: React.FC = () => {
 
         {/* Form Body */}
         <div className="p-6 sm:p-8 space-y-6">
+          {!isFirebaseActive && (
+            <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-800 text-xs flex items-center gap-2.5">
+              <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+              <span>Firebase belum dikonfigurasi (isi VITE_FIREBASE_* di .env). Login tidak dapat digunakan.</span>
+            </div>
+          )}
+
           {/* Error Banner */}
           {errorMessage && (
             <div className="p-3.5 rounded-xl bg-red-50 border border-red-300 text-red-700 text-xs flex items-center gap-2.5">
@@ -88,7 +88,8 @@ export const Login: React.FC = () => {
                 <input
                   type="email"
                   required
-                  placeholder="kasir@longmen.com"
+                  autoComplete="email"
+                  placeholder="nama@email.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-stone-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#D4AF37] focus:border-[#D4AF37]"
@@ -105,6 +106,7 @@ export const Login: React.FC = () => {
                 <input
                   type="password"
                   required
+                  autoComplete="current-password"
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -115,45 +117,13 @@ export const Login: React.FC = () => {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !isFirebaseActive}
               className="w-full py-3 rounded-xl bg-gradient-to-r from-[#8B0000] via-[#C8102E] to-[#8B0000] hover:brightness-110 text-[#FAF3E0] font-bold text-sm shadow-lg border border-[#D4AF37] flex items-center justify-center gap-2 transition active:scale-98 disabled:opacity-50 cursor-pointer"
             >
               <LogIn className="w-4 h-4" />
               <span>{loading ? 'Memverifikasi...' : 'Masuk ke Kasir (登录)'}</span>
             </button>
           </form>
-
-          {/* Quick Demo Logins Box */}
-          <div className="pt-4 border-t border-stone-200">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-bold text-stone-500 uppercase tracking-wider flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5 text-[#D4AF37]" /> Coba Akun Demo Instan:
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => handleQuickDemo('kasir1@longmen.com')}
-                className="p-2.5 rounded-xl bg-[#FAF3E0] hover:bg-[#F2E5C8] border border-[#D4AF37]/50 text-left transition cursor-pointer"
-              >
-                <div className="flex items-center gap-1.5 text-xs font-bold text-[#8B0000]">
-                  <User className="w-3.5 h-3.5" /> Kasir (Mei Ling)
-                </div>
-                <div className="text-[10px] text-stone-500">Katalog & Checkout POS</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickDemo('admin@longmen.com')}
-                className="p-2.5 rounded-xl bg-[#FAF3E0] hover:bg-[#F2E5C8] border border-[#D4AF37]/50 text-left transition cursor-pointer"
-              >
-                <div className="flex items-center gap-1.5 text-xs font-bold text-[#8B0000]">
-                  <ShieldCheck className="w-3.5 h-3.5" /> Admin (Master Chen)
-                </div>
-                <div className="text-[10px] text-stone-500">Dashboard & Settings</div>
-              </button>
-            </div>
-          </div>
         </div>
 
         {/* Footer info */}
