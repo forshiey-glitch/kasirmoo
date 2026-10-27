@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import {
   UserProfile,
   MenuItem,
@@ -8,13 +8,6 @@ import {
   MessageItem,
   StoreSettings,
 } from '../types';
-import {
-  INITIAL_USERS,
-  INITIAL_MENU,
-  INITIAL_TRANSAKSI,
-  INITIAL_MESSAGES,
-  INITIAL_SETTINGS,
-} from '../data/mockData';
 import { auth, db, isFirebaseConfigured } from '../lib/firebase';
 import {
   signInWithEmailAndPassword,
@@ -31,8 +24,23 @@ import {
   writeBatch,
   query,
   orderBy,
+  getDoc,
   getDocFromServer,
 } from 'firebase/firestore';
+
+// Ambil profil user langsung dari Firestore (users/{uid}); role HANYA dari sini
+const fetchUserProfile = async (uid: string): Promise<UserProfile | null> => {
+  if (!db) return null;
+  const snap = await getDoc(doc(db, 'users', uid));
+  if (!snap.exists()) return null;
+  return { ...(snap.data() as Omit<UserProfile, 'uid'>), uid: snap.id } as UserProfile;
+};
+
+const getHomePageForRole = (role?: string): string | null => {
+  if (role === 'admin') return 'admin-dashboard';
+  if (role === 'kasir') return 'kasir';
+  return null;
+};
 
 interface ToastState {
   id: string;
@@ -58,7 +66,6 @@ interface AppContextType {
   setSelectedChatTransactionId: (id: string | null) => void;
   login: (email: string, pass: string) => Promise<{ success: boolean; message?: string }>;
   logout: () => Promise<void>;
-  switchUser: (uid: string) => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
   removeToast: (id: string) => void;
 
@@ -106,80 +113,56 @@ interface AppContextType {
 
   // Settings Actions
   updateSettings: (newSettings: Partial<StoreSettings>) => Promise<void>;
-  syncInitialDataToFirestore: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // State
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
-    const saved = localStorage.getItem('longmen_current_user');
-    return saved ? JSON.parse(saved) : INITIAL_USERS[1]; // Default to Mei Ling (kasir) for immediate testing
-  });
+  // Sesi login dikelola Firebase Auth (lihat onAuthStateChanged), bukan localStorage
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const loginInProgress = useRef(false);
 
-  const [usersList, setUsersList] = useState<UserProfile[]>(() => {
-    const saved = localStorage.getItem('longmen_users');
-    return saved ? JSON.parse(saved) : INITIAL_USERS;
-  });
+  const [usersList, setUsersList] = useState<UserProfile[]>([]);
 
-  const [menuList, setMenuList] = useState<MenuItem[]>(() => {
-    const saved = localStorage.getItem('longmen_menu');
-    return saved ? JSON.parse(saved) : INITIAL_MENU;
-  });
+  const [menuList, setMenuList] = useState<MenuItem[]>([]);
 
-  const [transaksiList, setTransaksiList] = useState<Transaksi[]>(() => {
-    const saved = localStorage.getItem('longmen_transaksi');
-    return saved ? JSON.parse(saved) : INITIAL_TRANSAKSI;
-  });
+  const [transaksiList, setTransaksiList] = useState<Transaksi[]>([]);
 
-  const [messages, setMessages] = useState<MessageItem[]>(() => {
-    const saved = localStorage.getItem('longmen_messages');
-    return saved ? JSON.parse(saved) : INITIAL_MESSAGES;
-  });
+  const [messages, setMessages] = useState<MessageItem[]>([]);
 
-  const [settings, setSettings] = useState<StoreSettings>(() => {
-    const saved = localStorage.getItem('longmen_settings');
-    return saved ? JSON.parse(saved) : INITIAL_SETTINGS;
-  });
+  const [settings, setSettings] = useState<StoreSettings>(({} as StoreSettings));
 
   const [cart, setCart] = useState<CartItem[]>(() => {
     const saved = localStorage.getItem('longmen_cart');
     return saved ? JSON.parse(saved) : [];
   });
 
-  const [activePage, setActivePage] = useState<string>('kasir');
+  const [activePage, setActivePage] = useState<string>('login');
   const [selectedChatTransactionId, setSelectedChatTransactionId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastState[]>([]);
 
-  // Sync state to localStorage for persistence in demo mode
-  useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem('longmen_current_user', JSON.stringify(currentUser));
-    } else {
-      localStorage.removeItem('longmen_current_user');
-    }
-  }, [currentUser]);
+  // Kosongkan semua data di memori saat logout agar tidak bocor ke sesi berikutnya
+  const resetData = () => {
+    setUsersList([]);
+    setMenuList([]);
+    setTransaksiList([]);
+    setMessages([]);
+    setSettings({} as StoreSettings);
+  };
 
+  // Hanya keranjang belanja yang disimpan di localStorage (tidak berisi data user)
+  // Bersihkan sisa data demo/sesi lokal lama dari browser
   useEffect(() => {
-    localStorage.setItem('longmen_menu', JSON.stringify(menuList));
-  }, [menuList]);
-
-  useEffect(() => {
-    localStorage.setItem('longmen_transaksi', JSON.stringify(transaksiList));
-  }, [transaksiList]);
-
-  useEffect(() => {
-    localStorage.setItem('longmen_messages', JSON.stringify(messages));
-  }, [messages]);
-
-  useEffect(() => {
-    localStorage.setItem('longmen_settings', JSON.stringify(settings));
-  }, [settings]);
-
-  useEffect(() => {
-    localStorage.setItem('longmen_users', JSON.stringify(usersList));
-  }, [usersList]);
+    [
+      'longmen_current_user',
+      'longmen_users',
+      'longmen_menu',
+      'longmen_transaksi',
+      'longmen_messages',
+      'longmen_settings',
+    ].forEach((key) => localStorage.removeItem(key));
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('longmen_cart', JSON.stringify(cart));
@@ -187,7 +170,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Connect to Firebase Firestore listeners if configured
   useEffect(() => {
-    if (!isFirebaseConfigured || !db) return;
+    if (!isFirebaseConfigured || !db || !currentUser) return;
 
     const firestore = db;
     let isMounted = true;
@@ -207,11 +190,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const unsubs: (() => void)[] = [];
 
     try {
+      // Users listener (profil staf dari Firestore)
+      const unsubUsers = onSnapshot(
+        collection(firestore, 'users'),
+        (snap) => {
+          if (isMounted) {
+            const items: UserProfile[] = [];
+            snap.forEach((docSnap) => items.push({ ...docSnap.data(), uid: docSnap.id } as UserProfile));
+            setUsersList(items);
+          }
+        },
+        (err) => {
+          console.warn('Firestore users listener notice:', err.message);
+        }
+      );
+      unsubs.push(unsubUsers);
+
       // Menu listener
       const unsubMenu = onSnapshot(
         collection(firestore, 'menu'),
         (snap) => {
-          if (isMounted && !snap.empty) {
+          if (isMounted) {
             const items: MenuItem[] = [];
             snap.forEach((docSnap) => items.push({ id: docSnap.id, ...docSnap.data() } as MenuItem));
             setMenuList(items);
@@ -231,7 +230,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const unsubTrx = onSnapshot(
         query(collection(firestore, 'transaksi'), orderBy('tanggal_waktu', 'desc')),
         (snap) => {
-          if (isMounted && !snap.empty) {
+          if (isMounted) {
             const items: Transaksi[] = [];
             snap.forEach((docSnap) => items.push({ id: docSnap.id, ...docSnap.data() } as Transaksi));
             setTransaksiList(items);
@@ -251,7 +250,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const unsubMsg = onSnapshot(
         query(collection(firestore, 'messages'), orderBy('waktu', 'asc')),
         (snap) => {
-          if (isMounted && !snap.empty) {
+          if (isMounted) {
             const items: MessageItem[] = [];
             snap.forEach((docSnap) => items.push({ id: docSnap.id, ...docSnap.data() } as MessageItem));
             setMessages(items);
@@ -292,22 +291,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isMounted = false;
       unsubs.forEach((unsub) => unsub());
     };
-  }, []);
+  }, [currentUser?.uid]);
 
-  // Listen to Firebase Auth state
+  // Listen to Firebase Auth state: pulihkan sesi dari Firestore (bukan dari data lokal)
   useEffect(() => {
     if (!isFirebaseConfigured || !auth) return;
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        // Find in user profiles or set default
-        const match = usersList.find((u) => u.email === user.email || u.uid === user.uid);
-        if (match) {
-          setCurrentUser(match);
+    const firebaseAuth = auth;
+    const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
+      if (!user) {
+        setCurrentUser(null);
+        resetData();
+        return;
+      }
+      if (loginInProgress.current) return; // login() yang menangani
+      try {
+        const profile = await fetchUserProfile(user.uid);
+        const home = profile ? getHomePageForRole(profile.role) : null;
+        if (!profile || !home || profile.status_aktif === false) {
+          await firebaseSignOut(firebaseAuth);
+          setCurrentUser(null);
+          return;
         }
+        setCurrentUser(profile);
+        setActivePage((prev) => (prev === 'login' ? home : prev));
+      } catch (e) {
+        console.warn('Gagal memuat profil user:', e);
+        setCurrentUser(null);
       }
     });
     return () => unsubscribe();
-  }, [usersList]);
+  }, []);
 
   // Toast Helper
   const showToast = (message: string, type: 'success' | 'error' | 'info' | 'warning' = 'info') => {
@@ -385,52 +398,69 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCart([]);
   };
 
-  // Login handler
+  // Login handler: murni Firebase Auth, role dibaca dari Firestore
   const login = async (email: string, pass: string): Promise<{ success: boolean; message?: string }> => {
-    if (isFirebaseConfigured && auth) {
-      try {
-        const userCred = await signInWithEmailAndPassword(auth, email, pass);
-        const match = usersList.find((u) => u.email === email || u.uid === userCred.user.uid);
-        if (match) {
-          if (!match.status_aktif) {
-            await firebaseSignOut(auth);
-            return { success: false, message: 'Akun Anda dinonaktifkan oleh Admin. Hubungi manager.' };
-          }
-          setCurrentUser(match);
-          showToast(`Selamat datang kembali, ${match.nama_lengkap}! 🏮`, 'success');
-          setActivePage(match.role === 'admin' ? 'admin-dashboard' : 'kasir');
-          return { success: true };
-        }
-      } catch (err: unknown) {
-        // Jika akun belum dibuat di Firebase Console, cek apakah cocok dengan akun demo lokal
-        const demoMatch = usersList.find((u) => u.email.toLowerCase() === email.toLowerCase());
-        if (demoMatch) {
-          if (!demoMatch.status_aktif) {
-            return { success: false, message: 'Akun Anda dinonaktifkan oleh Admin. Hubungi manager.' };
-          }
-          setCurrentUser(demoMatch);
-          showToast(`Masuk sebagai ${demoMatch.nama_lengkap} (Mode demo / lokal) 🏮`, 'info');
-          setActivePage(demoMatch.role === 'admin' ? 'admin-dashboard' : 'kasir');
-          return { success: true };
-        }
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        return { success: false, message: 'Gagal login Firebase: ' + errorMsg };
+    if (!isFirebaseConfigured || !auth || !db) {
+      return { success: false, message: 'Firebase belum terkonfigurasi. Hubungi administrator.' };
+    }
+
+    const firebaseAuth = auth;
+    loginInProgress.current = true;
+    try {
+      const userCred = await signInWithEmailAndPassword(firebaseAuth, email, pass);
+      const profile = await fetchUserProfile(userCred.user.uid);
+
+      if (!profile) {
+        await firebaseSignOut(firebaseAuth);
+        return { success: false, message: 'Profil pengguna tidak ditemukan di database. Hubungi admin.' };
       }
-    }
+      if (profile.status_aktif === false) {
+        await firebaseSignOut(firebaseAuth);
+        return { success: false, message: 'Akun Anda dinonaktifkan oleh Admin. Hubungi manager.' };
+      }
 
-    // Local / Demo Login Match
-    const match = usersList.find((u) => u.email.toLowerCase() === email.toLowerCase());
-    if (!match) {
-      return { success: false, message: 'Email tidak ditemukan dalam sistem.' };
-    }
-    if (!match.status_aktif) {
-      return { success: false, message: 'Akun ini dinonaktifkan oleh Manager.' };
-    }
+      const homePage = getHomePageForRole(profile.role);
+      if (!homePage) {
+        await firebaseSignOut(firebaseAuth);
+        return { success: false, message: 'Role akun tidak valid. Hubungi admin.' };
+      }
 
-    setCurrentUser(match);
-    showToast(`Login berhasil sebagai ${match.nama_lengkap} (${match.role}) 🏮`, 'success');
-    setActivePage(match.role === 'admin' ? 'admin-dashboard' : 'kasir');
-    return { success: true };
+      setCurrentUser(profile);
+      setActivePage(homePage); // admin -> 'admin-dashboard', kasir -> 'kasir'
+      showToast(`Selamat datang kembali, ${profile.nama_lengkap}! 🏮`, 'success');
+      return { success: true };
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
+      // Gagal setelah autentikasi (mis. baca Firestore): jangan biarkan sesi menggantung
+      if (!code?.startsWith('auth/') && firebaseAuth.currentUser) {
+        await firebaseSignOut(firebaseAuth).catch(() => {});
+      }
+      let message: string;
+      switch (code) {
+        case 'auth/invalid-credential':
+        case 'auth/wrong-password':
+        case 'auth/user-not-found':
+          message = 'Email atau password salah.';
+          break;
+        case 'auth/invalid-email':
+          message = 'Format email tidak valid.';
+          break;
+        case 'auth/too-many-requests':
+          message = 'Terlalu banyak percobaan login. Coba lagi beberapa saat.';
+          break;
+        case 'auth/network-request-failed':
+          message = 'Gagal terhubung ke server. Periksa koneksi internet.';
+          break;
+        case 'permission-denied':
+          message = 'Tidak punya izin membaca profil pengguna. Periksa Firestore Rules.';
+          break;
+        default:
+          message = 'Gagal login: ' + (err instanceof Error ? err.message : String(err));
+      }
+      return { success: false, message };
+    } finally {
+      loginInProgress.current = false;
+    }
   };
 
   const logout = async () => {
@@ -442,17 +472,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
     setCurrentUser(null);
+    resetData();
     clearCart();
     setActivePage('login');
     showToast('Berhasil keluar dari sesi kasir.', 'info');
-  };
-
-  const switchUser = (uid: string) => {
-    const user = usersList.find((u) => u.uid === uid);
-    if (user) {
-      setCurrentUser(user);
-      showToast(`Beralih akun ke: ${user.nama_lengkap} (${user.role.toUpperCase()})`, 'info');
-    }
   };
 
   // Create Transaksi
@@ -761,40 +784,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('Pengaturan toko & QRIS berhasil diperbarui! 🏮', 'success');
   };
 
-  const syncInitialDataToFirestore = async () => {
-    if (!isFirebaseConfigured || !db) {
-      showToast('Firebase belum terkonfigurasi di environment (.env)', 'warning');
-      return;
-    }
-    try {
-      const firestore = db;
-      const batch = writeBatch(firestore);
-
-      // Seed Menu
-      INITIAL_MENU.forEach((item) => {
-        const itemRef = doc(firestore, 'menu', item.id);
-        batch.set(itemRef, item, { merge: true });
-      });
-
-      // Seed QRIS Settings
-      const settingsRef = doc(firestore, 'settings', 'qris');
-      batch.set(settingsRef, INITIAL_SETTINGS, { merge: true });
-
-      // Seed Users
-      INITIAL_USERS.forEach((u) => {
-        const uRef = doc(firestore, 'users', u.uid);
-        batch.set(uRef, u, { merge: true });
-      });
-
-      await batch.commit();
-      showToast('Data awal restoran (15 menu & QRIS) berhasil diunggah ke Firestore! 🏮', 'success');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn('Sync initial data Firestore:', msg);
-      showToast('Gagal inisialisasi ke Firestore: ' + msg, 'error');
-    }
-  };
-
   return (
     <AppContext.Provider
       value={{
@@ -813,7 +802,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setSelectedChatTransactionId,
         login,
         logout,
-        switchUser,
         showToast,
         removeToast,
         addToCart,
@@ -836,7 +824,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         markMessageAsRead,
         unreadCount,
         updateSettings,
-        syncInitialDataToFirestore,
       }}
     >
       {children}
