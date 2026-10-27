@@ -9,15 +9,14 @@ import {
   ChevronDown,
   ShoppingBag,
   Sliders,
-  Users,
 } from 'lucide-react';
-
+ 
 interface HeaderProps {
   onToggleSidebar?: () => void;
   searchTerm?: string;
   onSearchChange?: (val: string) => void;
 }
-
+ 
 export const Header: React.FC<HeaderProps> = ({
   searchTerm,
   onSearchChange,
@@ -28,9 +27,9 @@ export const Header: React.FC<HeaderProps> = ({
     setActivePage,
     isFirebaseActive,
   } = useApp();
-  const { currentUser, logout, switchUser, usersList, isAdmin } = useAuth();
+  const { currentUser, logout, isAdmin } = useAuth();
   const [showUserDropdown, setShowUserDropdown] = useState(false);
-
+ 
   return (
     <header className="relative bg-gradient-to-r from-[#8B0000] via-[#C8102E] to-[#8B0000] text-[#FAF3E0] shadow-md border-b-2 border-[#D4AF37] px-4 py-3 z-30 shrink-0">
       {/* Decorative Cloud SVG Lattice on Header */}
@@ -44,7 +43,7 @@ export const Header: React.FC<HeaderProps> = ({
           />
         </svg>
       </div>
-
+ 
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 relative z-10">
         {/* Left: Brand / Title */}
         <div className="flex items-center gap-3">
@@ -70,7 +69,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
         </div>
-
+ 
         {/* Center: Search Bar if on Kasir page */}
         {onSearchChange !== undefined && (
           <div className="hidden md:flex flex-1 max-w-md mx-4">
@@ -93,30 +92,20 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
         )}
-
+ 
         {/* Right Actions */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Environment Status Badge */}
-          <div
-            className={`hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
-              isFirebaseActive
-                ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/50'
-                : 'bg-amber-950/60 text-amber-200 border-amber-500/50'
-            }`}
-            title={
-              isFirebaseActive
-                ? 'Terhubung ke Firebase Firestore & Storage'
-                : 'Mode Demo Lokal Aktif (Data tersimpan di browser)'
-            }
-          >
-            <span
-              className={`w-2 h-2 rounded-full ${
-                isFirebaseActive ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'
-              }`}
-            />
-            <span>{isFirebaseActive ? 'Firebase Live' : 'Demo Local'}</span>
-          </div>
-
+          {/* Firebase Status Badge */}
+          {isFirebaseActive && (
+            <div
+              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-emerald-950/60 text-emerald-300 border-emerald-500/50"
+              title="Terhubung ke Firebase Auth & Firestore"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+              <span>Firebase Live</span>
+            </div>
+          )}
+ 
           {/* Quick Chat Button with Badge */}
           <button
             onClick={() => setActivePage('chat')}
@@ -132,7 +121,7 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             )}
           </button>
-
+ 
           {/* Switch Role / Admin Shortcut (Tablet/Desktop) */}
           {isAdmin ? (
             <button
@@ -150,7 +139,7 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </button>
           ) : null}
-
+ 
           {/* User Profile & Dropdown */}
           {currentUser && (
             <div className="relative">
@@ -175,7 +164,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </div>
                 <ChevronDown className="w-3.5 h-3.5 text-[#F5C542] hidden sm:block" />
               </button>
-
+ 
               {/* Dropdown Menu */}
               {showUserDropdown && (
                 <>
@@ -189,35 +178,7 @@ export const Header: React.FC<HeaderProps> = ({
                       <p className="font-bold text-sm text-[#8B0000]">{currentUser.nama_lengkap}</p>
                       <p className="text-xs text-stone-600">{currentUser.email}</p>
                     </div>
-
-                    {/* Quick Demo Switcher */}
-                    <div className="px-3 py-2 border-b border-stone-200">
-                      <p className="text-[11px] font-bold text-stone-400 uppercase tracking-wider mb-1 flex items-center gap-1">
-                        <Users className="w-3 h-3" /> Ganti Akun Demo Cepat
-                      </p>
-                      <div className="space-y-1">
-                        {usersList.map((u) => (
-                          <button
-                            key={u.uid}
-                            onClick={() => {
-                              switchUser(u.uid);
-                              setShowUserDropdown(false);
-                            }}
-                            className={`w-full text-left px-2 py-1.5 rounded-lg text-xs flex items-center justify-between transition cursor-pointer ${
-                              u.uid === currentUser.uid
-                                ? 'bg-[#FAF3E0] font-bold text-[#8B0000] border border-[#D4AF37]'
-                                : 'hover:bg-stone-100 text-stone-700'
-                            }`}
-                          >
-                            <span>{u.nama_lengkap}</span>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-stone-200 text-stone-700 uppercase">
-                              {u.role}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
+ 
                     <div className="pt-1">
                       <button
                         onClick={() => {
@@ -239,3 +200,4 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
+ 
