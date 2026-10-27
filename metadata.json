@@ -1,0 +1,6 @@
+{
+  "name": "LongMen POS (龍門客棧) - Chinese Modern Cashier",
+  "description": "Aplikasi Kasir (POS) tema Chinese modern dengan Firebase Firestore, Auth, Storage, QRIS scan & upload bukti, chat internal real-time, dan manajemen inventori restoran.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

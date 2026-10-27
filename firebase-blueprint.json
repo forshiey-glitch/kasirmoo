@@ -1,0 +1,115 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Pengguna aplikasi kasir (admin atau kasir)",
+      "type": "object",
+      "properties": {
+        "username": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin", "kasir"] },
+        "nama_lengkap": { "type": "string" },
+        "status_aktif": { "type": "boolean" },
+        "avatar_url": { "type": "string" }
+      },
+      "required": ["email", "role", "nama_lengkap", "status_aktif"]
+    },
+    "Menu": {
+      "title": "Menu",
+      "description": "Item menu restoran Chinese (dim sum, mi, hidangan utama, teh)",
+      "type": "object",
+      "properties": {
+        "nama_menu": { "type": "string" },
+        "kategori": { "type": "string" },
+        "harga": { "type": "number" },
+        "stok": { "type": "number" },
+        "status": { "type": "string", "enum": ["aktif", "nonaktif"] },
+        "tanggal_ditambah": { "type": "string" }
+      },
+      "required": ["nama_menu", "kategori", "harga", "stok", "status"]
+    },
+    "Transaksi": {
+      "title": "Transaksi",
+      "description": "Record transaksi penjualan POS",
+      "type": "object",
+      "properties": {
+        "tanggal_waktu": { "type": "string" },
+        "id_kasir": { "type": "string" },
+        "nama_kasir": { "type": "string" },
+        "total_bayar": { "type": "number" },
+        "metode_bayar": { "type": "string", "enum": ["cash", "qris"] },
+        "url_bukti_qris": { "type": "string" },
+        "status": { "type": "string", "enum": ["selesai", "pending_verifikasi", "dibatalkan"] },
+        "catatan": { "type": "string" }
+      },
+      "required": ["tanggal_waktu", "id_kasir", "nama_kasir", "total_bayar", "metode_bayar", "status"]
+    },
+    "DetailTransaksi": {
+      "title": "DetailTransaksi",
+      "description": "Item detail dalam satu transaksi",
+      "type": "object",
+      "properties": {
+        "id_transaksi": { "type": "string" },
+        "id_menu": { "type": "string" },
+        "nama_menu": { "type": "string" },
+        "harga_satuan": { "type": "number" },
+        "qty": { "type": "number" },
+        "subtotal": { "type": "number" }
+      },
+      "required": ["id_transaksi", "id_menu", "nama_menu", "harga_satuan", "qty", "subtotal"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Pesan internal antara kasir dan admin",
+      "type": "object",
+      "properties": {
+        "id_pengirim": { "type": "string" },
+        "nama_pengirim": { "type": "string" },
+        "role_pengirim": { "type": "string" },
+        "id_penerima": { "type": "string" },
+        "isi_pesan": { "type": "string" },
+        "attachment_url": { "type": "string" },
+        "attachment_type": { "type": "string" },
+        "waktu": { "type": "string" },
+        "sudah_dibaca": { "type": "boolean" },
+        "id_transaksi": { "type": "string" }
+      },
+      "required": ["id_pengirim", "nama_pengirim", "role_pengirim", "waktu"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Pengaturan toko seperti gambar QRIS aktif",
+      "type": "object",
+      "properties": {
+        "url": { "type": "string" },
+        "updated_at": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Daftar pengguna POS dengan role kasir atau admin"
+    },
+    "/menu/{menuId}": {
+      "schema": { "$ref": "#/entities/Menu" },
+      "description": "Daftar menu makanan dan minuman"
+    },
+    "/transaksi/{transaksiId}": {
+      "schema": { "$ref": "#/entities/Transaksi" },
+      "description": "Daftar transaksi kasir"
+    },
+    "/detail_transaksi/{detailId}": {
+      "schema": { "$ref": "#/entities/DetailTransaksi" },
+      "description": "Detail per item pesanan per transaksi"
+    },
+    "/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Pesan internal kasir dan admin"
+    },
+    "/settings/qris": {
+      "schema": { "$ref": "#/entities/Settings" },
+      "description": "Konfigurasi URL QRIS dinamis toko"
+    }
+  }
+}

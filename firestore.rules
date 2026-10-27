@@ -1,0 +1,96 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        getUserData().role == 'admin' ||
+        request.auth.token.email == 'admin@longmen.com'
+      );
+    }
+
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // USERS COLLECTION
+    // Admin can manage all; authenticated users can read profiles and update their own name/avatar
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (isOwner(userId) || isAdmin());
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (isOwner(userId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'email']))
+      );
+      allow delete: if isAdmin();
+    }
+
+    // MENU COLLECTION
+    // Everyone authenticated can view menu; Admin can create, update, delete
+    // Kasir can update 'stok' when transactions are made
+    match /menu/{menuId} {
+      allow read: if isSignedIn();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        isSignedIn() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stok'])
+      );
+    }
+
+    // TRANSAKSI COLLECTION
+    // Kasir and Admin can read transactions and create new transactions.
+    // Admin can update status (e.g., verifying QRIS payment)
+    match /transaksi/{transaksiId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.id_kasir == request.auth.uid;
+      allow update: if isSignedIn() && (
+        isAdmin() || 
+        (resource.data.id_kasir == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['url_bukti_qris', 'status', 'catatan']))
+      );
+      allow delete: if isAdmin();
+    }
+
+    // DETAIL TRANSAKSI COLLECTION
+    match /detail_transaksi/{detailId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // MESSAGES COLLECTION (Internal POS Chat)
+    match /messages/{messageId} {
+      allow read: if isSignedIn() && (
+        resource.data.id_penerima == null ||
+        resource.data.id_penerima == request.auth.uid ||
+        resource.data.id_pengirim == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isSignedIn() && request.resource.data.id_pengirim == request.auth.uid;
+      allow update: if isSignedIn() && (
+        resource.data.id_penerima == request.auth.uid ||
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    // SETTINGS COLLECTION
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}
