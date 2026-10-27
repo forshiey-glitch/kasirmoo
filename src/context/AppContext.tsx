@@ -33,8 +33,17 @@ const fetchUserProfile = async (uid: string): Promise<UserProfile | null> => {
   if (!db) return null;
   const snap = await getDoc(doc(db, 'users', uid));
   if (!snap.exists()) return null;
-  return { ...(snap.data() as Omit<UserProfile, 'uid'>), uid: snap.id } as UserProfile;
+  const data = snap.data() as Record<string, unknown>;
+  // Dokumen lama bisa memakai field `nama`; pastikan nama_lengkap selalu terisi
+  const emailName = typeof data.email === 'string' ? data.email.split('@')[0] : '';
+  const nama =
+    (data.nama_lengkap as string) || (data.nama as string) || (data.username as string) || emailName || 'Pengguna';
+  return { ...data, uid: snap.id, nama_lengkap: nama } as unknown as UserProfile;
 };
+
+// Firestore menolak nilai `undefined`; buang field tersebut sebelum disimpan
+const stripUndefined = <T extends object>(obj: T): T =>
+  Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as T;
 
 const getHomePageForRole = (role?: string): string | null => {
   if (role === 'admin') return 'admin-dashboard';
@@ -489,6 +498,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!currentUser) throw new Error('Pengguna belum login');
     if (cart.length === 0) throw new Error('Keranjang belanja kosong');
 
+    if (!isFirebaseConfigured || !db) {
+      const msg = 'Firebase belum terkonfigurasi. Transaksi tidak dapat disimpan.';
+      showToast(msg, 'error');
+      throw new Error(msg);
+    }
+    const firestore = db;
+
+    // Ambil identitas kasir dengan aman (jangan sampai undefined)
+    const idKasir = auth?.currentUser?.uid || currentUser.uid;
+    const namaKasir =
+      currentUser.nama_lengkap ||
+      (currentUser as unknown as { nama?: string }).nama ||
+      currentUser.username ||
+      currentUser.email ||
+      'Kasir';
+
+    if (!idKasir) {
+      const msg = 'Sesi login tidak valid. Silakan login ulang.';
+      showToast(msg, 'error');
+      throw new Error(msg);
+    }
+
     const trxId = `TRX-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
     const nowIso = new Date().toISOString();
 
@@ -507,73 +538,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newTrx: Transaksi = {
       id: trxId,
       tanggal_waktu: nowIso,
-      id_kasir: currentUser.uid,
-      nama_kasir: currentUser.nama_lengkap,
+      id_kasir: idKasir,
+      nama_kasir: namaKasir,
       total_bayar: cartTotal,
       metode_bayar: data.metode_bayar,
-      url_bukti_qris: data.url_bukti_qris,
+      url_bukti_qris: data.url_bukti_qris || '',
       status: statusAwal,
-      catatan: data.catatan,
-      jumlah_diterima: data.jumlah_diterima,
-      kembalian: data.kembalian,
+      catatan: data.catatan || '',
+      jumlah_diterima: data.jumlah_diterima ?? 0,
+      kembalian: data.kembalian ?? 0,
       items: detailItems,
     };
 
-    // Deduct stock locally
-    setMenuList((prev) =>
-      prev.map((m) => {
-        const inCart = cart.find((c) => c.menu.id === m.id);
-        if (inCart) {
-          const newStok = Math.max(0, m.stok - inCart.qty);
-          return { ...m, stok: newStok };
+    try {
+      const batch = writeBatch(firestore);
+
+      // Transaksi doc (tanpa field `id` dan `items`, disimpan terpisah)
+      const { id: _id, items: _items, ...trxData } = newTrx;
+      batch.set(doc(firestore, 'transaksi', trxId), stripUndefined(trxData));
+
+      // Detail items
+      detailItems.forEach((d, idx) => {
+        batch.set(doc(firestore, 'detail_transaksi', `${trxId}_${idx}`), stripUndefined(d));
+      });
+
+      // Update stok menu
+      cart.forEach((c) => {
+        const currentItem = menuList.find((m) => m.id === c.menu.id);
+        if (currentItem) {
+          batch.update(doc(firestore, 'menu', c.menu.id), {
+            stok: Math.max(0, currentItem.stok - c.qty),
+          });
         }
-        return m;
-      })
-    );
+      });
 
-    // Save to Firestore if connected
-    if (isFirebaseConfigured && db) {
-      try {
-        const firestore = db;
-        const batch = writeBatch(firestore);
-        // Transaksi doc
-        const trxRef = doc(firestore, 'transaksi', trxId);
-        batch.set(trxRef, {
-          tanggal_waktu: nowIso,
-          id_kasir: currentUser.uid,
-          nama_kasir: currentUser.nama_lengkap,
-          total_bayar: cartTotal,
-          metode_bayar: data.metode_bayar,
-          url_bukti_qris: data.url_bukti_qris || '',
-          status: statusAwal,
-          catatan: data.catatan || '',
-          jumlah_diterima: data.jumlah_diterima || 0,
-          kembalian: data.kembalian || 0,
-        });
-
-        // Detail items
-        detailItems.forEach((d, idx) => {
-          const detailRef = doc(firestore, 'detail_transaksi', `${trxId}_${idx}`);
-          batch.set(detailRef, d);
-        });
-
-        // Update menu stock
-        cart.forEach((c) => {
-          const menuRef = doc(firestore, 'menu', c.menu.id);
-          const currentItem = menuList.find((m) => m.id === c.menu.id);
-          if (currentItem) {
-            batch.update(menuRef, { stok: Math.max(0, currentItem.stok - c.qty) });
-          }
-        });
-
-        await batch.commit();
-        console.log('✅ Transaksi tersimpan ke Firestore:', trxId);
-      } catch (err) {
-        console.warn('Gagal commit batch Firestore, tetap simpan lokal:', err);
-      }
+      await batch.commit();
+      console.log('✅ Transaksi tersimpan ke Firestore:', trxId);
+    } catch (err) {
+      console.error('Gagal menyimpan transaksi ke Firestore:', err);
+      const detail = err instanceof Error ? err.message : String(err);
+      showToast(`Gagal menyimpan transaksi ke Firestore: ${detail}`, 'error');
+      throw err; // keranjang tidak dikosongkan agar kasir bisa mencoba lagi
     }
 
-    setTransaksiList((prev) => [newTrx, ...prev]);
+    // Stok & daftar transaksi diperbarui otomatis oleh listener Firestore
     clearCart();
     showToast(`Transaksi ${trxId} berhasil diproses! 🏮`, 'success');
     return newTrx;
