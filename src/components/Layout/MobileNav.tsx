@@ -20,7 +20,7 @@ export const MobileNav: React.FC = () => {
       id: 'chat',
       label: 'Chat',
       icon: <MessageSquare className="w-5 h-5" />,
-      badge: unreadCount > 0 ? unreadCount : null,
+      badge: unreadCount > 0 ? (unreadCount > 99 ? '99+' : unreadCount) : null,
     },
     {
       id: 'riwayat',
@@ -55,7 +55,7 @@ export const MobileNav: React.FC = () => {
               <div className="relative">
                 {item.icon}
                 {item.badge !== null && item.badge !== undefined && (
-                  <span className="absolute -top-1.5 -right-2.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#C8102E] text-white text-[10px] font-bold flex items-center justify-center border border-white">
+                  <span className="absolute -top-1.5 -right-2.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center border border-white">
                     {item.badge}
                   </span>
                 )}
