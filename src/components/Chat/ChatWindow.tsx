@@ -22,6 +22,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     messages,
     sendMessage,
     markMessageAsRead,
+    isMessageUnread,
     currentUser,
     usersList,
     selectedChatTransactionId,
@@ -47,7 +48,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   // Mark unread messages in view as read
   useEffect(() => {
     conversationMessages.forEach((m) => {
-      if (!m.sudah_dibaca && m.id_pengirim !== currentUser?.uid) {
+      if (isMessageUnread(m)) {
         markMessageAsRead(m.id);
       }
     });
