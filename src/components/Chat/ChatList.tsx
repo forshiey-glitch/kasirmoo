@@ -15,7 +15,7 @@ export const ChatList: React.FC<ChatListProps> = ({
   onSelectRecipient,
   className = '',
 }) => {
-  const { usersList, currentUser, messages } = useApp();
+  const { usersList, currentUser, messages, isMessageUnread } = useApp();
 
   // Filter other users
   const otherUsers = usersList.filter((u) => u.uid !== currentUser?.uid);
@@ -23,11 +23,11 @@ export const ChatList: React.FC<ChatListProps> = ({
   // Helper count unread for channel
   const getChannelUnread = (recipientId: string | null) => {
     return messages.filter((m) => {
-      if (m.sudah_dibaca || m.id_pengirim === currentUser?.uid) return false;
+      if (!isMessageUnread(m)) return false;
       if (recipientId === null) {
-        return m.id_penerima === null;
+        return m.id_penerima == null;
       }
-      return m.id_pengirim === recipientId;
+      return m.id_pengirim === recipientId && m.id_penerima != null;
     }).length;
   };
 
