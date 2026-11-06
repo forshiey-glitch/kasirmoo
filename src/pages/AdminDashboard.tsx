@@ -26,11 +26,10 @@ export const AdminDashboard: React.FC = () => {
 
     const totalTrxSelesai = transaksiList.filter((t) => t.status === 'selesai').length;
 
+    // Transaksi dibatalkan tidak dihitung sebagai penjualan
     const totalItemTerjual = transaksiList.reduce((sum, t) => {
-      if (t.items) {
-        return sum + t.items.reduce((s, i) => s + i.qty, 0);
-      }
-      return sum;
+      if (t.status === 'dibatalkan' || !t.items) return sum;
+      return sum + t.items.reduce((s, i) => s + (Number(i.qty) || 0), 0);
     }, 0);
 
     return {
@@ -43,14 +42,19 @@ export const AdminDashboard: React.FC = () => {
 
   // Top Selling Items
   const topItems = useMemo(() => {
+    // Grouping: jumlahkan qty & pendapatan per menu dari seluruh transaksi (item berasal dari
+    // koleksi detail_transaksi yang digabung di AppContext). Transaksi dibatalkan diabaikan.
     const counts: Record<string, { nama: string; qty: number; revenue: number }> = {};
     transaksiList.forEach((t) => {
+      if (t.status === 'dibatalkan') return;
       t.items?.forEach((i) => {
-        if (!counts[i.nama_menu]) {
-          counts[i.nama_menu] = { nama: i.nama_menu, qty: 0, revenue: 0 };
+        const key = i.id_menu || i.nama_menu;
+        if (!counts[key]) {
+          counts[key] = { nama: i.nama_menu, qty: 0, revenue: 0 };
         }
-        counts[i.nama_menu].qty += i.qty;
-        counts[i.nama_menu].revenue += i.subtotal;
+        const qty = Number(i.qty) || 0;
+        counts[key].qty += qty;
+        counts[key].revenue += Number(i.subtotal) || (Number(i.harga_satuan) || 0) * qty;
       });
     });
     return Object.values(counts)
@@ -199,7 +203,7 @@ export const AdminDashboard: React.FC = () => {
               <p className="text-xs text-stone-400 py-4 text-center">Belum ada data penjualan</p>
             ) : (
               topItems.map((item, idx) => (
-                <div key={idx} className="flex items-center justify-between text-xs sm:text-sm">
+                <div key={`${item.nama}-${idx}`} className="flex items-center justify-between text-xs sm:text-sm">
                   <div className="flex items-center gap-2.5">
                     <span className="w-5 h-5 rounded-full bg-[#FAF3E0] text-[#8B0000] font-bold text-[11px] flex items-center justify-center border border-[#D4AF37]">
                       {idx + 1}
