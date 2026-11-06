@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ShoppingBag,
   Sliders,
+  WifiOff,
 } from 'lucide-react';
  
 interface HeaderProps {
@@ -96,13 +97,24 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Right Actions */}
         <div className="flex items-center gap-2 sm:gap-3">
           {/* Firebase Status Badge */}
-          {isFirebaseActive && (
+          {isFirebaseActive ? (
             <div
-              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-emerald-950/60 text-emerald-300 border-emerald-500/50"
+              className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded-full text-[10px] sm:text-xs font-medium border bg-emerald-950/60 text-emerald-300 border-emerald-500/50 whitespace-nowrap"
               title="Terhubung ke Firebase Auth & Firestore"
             >
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+              <span className="relative flex w-2 h-2">
+                <span className="absolute inline-flex w-full h-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                <span className="relative inline-flex w-2 h-2 rounded-full bg-emerald-400" />
+              </span>
               <span>Firebase Live</span>
+            </div>
+          ) : (
+            <div
+              className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded-full text-[10px] sm:text-xs font-medium border bg-red-950/70 text-red-200 border-red-400/60 whitespace-nowrap"
+              title="Tidak terhubung ke Firebase. Data mungkin tidak ter-update."
+            >
+              <WifiOff className="w-3 h-3" />
+              <span>Offline</span>
             </div>
           )}
  
@@ -116,8 +128,11 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <MessageSquare className="w-5 h-5 text-[#FAF3E0]" />
             {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-[#D4AF37] text-[#4A3000] text-[10px] font-bold flex items-center justify-center px-1 border border-[#8B0000] animate-bounce">
-                {unreadCount}
+              <span
+                className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center px-1 border-2 border-white shadow animate-pulse"
+                aria-label={`${unreadCount} pesan belum dibaca`}
+              >
+                {unreadCount > 99 ? '99+' : unreadCount}
               </span>
             )}
           </button>
@@ -200,4 +215,3 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
- 
