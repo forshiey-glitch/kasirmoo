@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   UserProfile,
   MenuItem,
@@ -14,6 +14,7 @@ import {
   signOut as firebaseSignOut,
   onAuthStateChanged,
 } from 'firebase/auth';
+import type { Query } from 'firebase/firestore';
 import {
   collection,
   onSnapshot,
@@ -24,6 +25,7 @@ import {
   writeBatch,
   query,
   orderBy,
+  where,
   getDoc,
   getDocFromServer,
 } from 'firebase/firestore';
@@ -118,6 +120,7 @@ interface AppContextType {
     id_transaksi?: string;
   }) => Promise<void>;
   markMessageAsRead: (messageId: string) => Promise<void>;
+  isMessageUnread: (m: MessageItem) => boolean;
   unreadCount: number;
 
   // Settings Actions
@@ -136,7 +139,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [menuList, setMenuList] = useState<MenuItem[]>([]);
 
-  const [transaksiList, setTransaksiList] = useState<Transaksi[]>([]);
+  // Dokumen `transaksi` TIDAK menyimpan item; item ada di koleksi `detail_transaksi`.
+  // Keduanya dimuat terpisah lalu digabung menjadi `transaksiList` (lengkap dengan `items`).
+  const [transaksiRaw, setTransaksiRaw] = useState<Transaksi[]>([]);
+  const [detailMap, setDetailMap] = useState<Record<string, DetailTransaksi[]>>({});
 
   const [messages, setMessages] = useState<MessageItem[]>([]);
 
@@ -151,11 +157,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedChatTransactionId, setSelectedChatTransactionId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastState[]>([]);
 
+  // Ref agar listener real-time selalu tahu halaman aktif tanpa harus re-subscribe
+  const activePageRef = useRef(activePage);
+  activePageRef.current = activePage;
+  const notifiedMsgIds = useRef<Set<string>>(new Set());
+
+  // Status koneksi Firebase (bukan sekadar "sudah dikonfigurasi")
+  const [isOnline, setIsOnline] = useState<boolean>(
+    typeof navigator === 'undefined' ? true : navigator.onLine
+  );
+  const [serverLive, setServerLive] = useState<boolean>(true);
+  const hasBeenLive = useRef(false);
+
+  // Status baca pesan siaran (broadcast) disimpan per-user di perangkat ini, karena satu dokumen
+  // broadcast dibaca banyak orang dan kasir tidak boleh mengubahnya di Firestore.
+  const [broadcastRead, setBroadcastRead] = useState<{ uid: string; since: string; ids: string[] }>({
+    uid: '',
+    since: '',
+    ids: [],
+  });
+
   // Kosongkan semua data di memori saat logout agar tidak bocor ke sesi berikutnya
   const resetData = () => {
     setUsersList([]);
     setMenuList([]);
-    setTransaksiList([]);
+    setTransaksiRaw([]);
+    setDetailMap({});
     setMessages([]);
     setSettings({} as StoreSettings);
   };
@@ -177,6 +204,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem('longmen_cart', JSON.stringify(cart));
   }, [cart]);
 
+  const transaksiList = useMemo<Transaksi[]>(
+    () =>
+      transaksiRaw.map((t) => {
+        const detail = detailMap[t.id];
+        return detail && detail.length > 0 ? { ...t, items: detail } : t;
+      }),
+    [transaksiRaw, detailMap]
+  );
+
+  // Pantau status jaringan browser
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => {
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
+  }, []);
+
+  // Muat status baca broadcast milik user yang sedang login
+  useEffect(() => {
+    const uid = currentUser?.uid;
+    if (!uid) return;
+    const key = `longmen_broadcast_read_${uid}`;
+    let loaded: { uid: string; since: string; ids: string[] } | null = null;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.since === 'string' && Array.isArray(parsed.ids)) {
+          loaded = { uid, since: parsed.since, ids: parsed.ids };
+        }
+      }
+    } catch {
+      /* abaikan data rusak */
+    }
+    // Pertama kali di perangkat ini: siaran lama dianggap sudah terbaca
+    setBroadcastRead(loaded ?? { uid, since: new Date().toISOString(), ids: [] });
+  }, [currentUser?.uid]);
+
+  useEffect(() => {
+    if (!currentUser?.uid || broadcastRead.uid !== currentUser.uid) return;
+    try {
+      localStorage.setItem(`longmen_broadcast_read_${currentUser.uid}`, JSON.stringify(broadcastRead));
+    } catch {
+      /* localStorage penuh/dinonaktifkan */
+    }
+  }, [broadcastRead, currentUser?.uid]);
+
   // Connect to Firebase Firestore listeners if configured
   useEffect(() => {
     if (!isFirebaseConfigured || !db || !currentUser) return;
@@ -197,6 +275,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     testConnection();
 
     const unsubs: (() => void)[] = [];
+    notifiedMsgIds.current = new Set();
+    hasBeenLive.current = false;
+    setServerLive(true);
 
     try {
       // Users listener (profil staf dari Firestore)
@@ -218,8 +299,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Menu listener
       const unsubMenu = onSnapshot(
         collection(firestore, 'menu'),
+        { includeMetadataChanges: true },
         (snap) => {
           if (isMounted) {
+            // Data dari server => live. Kembali ke cache setelah pernah live => terputus.
+            if (!snap.metadata.fromCache) {
+              hasBeenLive.current = true;
+              setServerLive(true);
+            } else if (hasBeenLive.current) {
+              setServerLive(false);
+            }
             const items: MenuItem[] = [];
             snap.forEach((docSnap) => items.push({ id: docSnap.id, ...docSnap.data() } as MenuItem));
             setMenuList(items);
@@ -227,6 +316,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         },
         (err) => {
           if (err.code === 'unavailable' || err.message?.includes('offline')) {
+            setServerLive(false);
             console.info('ℹ️ Menu Firestore: beroperasi dalam mode cache offline.');
           } else {
             console.warn('Firestore menu listener notice:', err.message);
@@ -242,7 +332,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (isMounted) {
             const items: Transaksi[] = [];
             snap.forEach((docSnap) => items.push({ id: docSnap.id, ...docSnap.data() } as Transaksi));
-            setTransaksiList(items);
+            setTransaksiRaw(items);
           }
         },
         (err) => {
@@ -255,25 +345,101 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
       unsubs.push(unsubTrx);
 
-      // Messages listener
-      const unsubMsg = onSnapshot(
-        query(collection(firestore, 'messages'), orderBy('waktu', 'asc')),
+      // Detail transaksi listener: kumpulkan item per transaksi (grouping by id_transaksi)
+      const unsubDetail = onSnapshot(
+        collection(firestore, 'detail_transaksi'),
         (snap) => {
-          if (isMounted) {
-            const items: MessageItem[] = [];
-            snap.forEach((docSnap) => items.push({ id: docSnap.id, ...docSnap.data() } as MessageItem));
-            setMessages(items);
-          }
+          if (!isMounted) return;
+          const grouped: Record<string, DetailTransaksi[]> = {};
+          snap.forEach((docSnap) => {
+            const data = docSnap.data() as DetailTransaksi;
+            if (!data.id_transaksi) return;
+            if (!grouped[data.id_transaksi]) grouped[data.id_transaksi] = [];
+            grouped[data.id_transaksi].push({ ...data, id: docSnap.id });
+          });
+          // Id dokumen berformat `${trxId}_${index}`; urutkan sesuai urutan keranjang
+          const idx = (id?: string) => parseInt((id || '').split('_').pop() || '0', 10) || 0;
+          Object.values(grouped).forEach((list) => list.sort((a, b) => idx(a.id) - idx(b.id)));
+          setDetailMap(grouped);
         },
         (err) => {
-          if (err.code === 'unavailable' || err.message?.includes('offline')) {
-            console.info('ℹ️ Messages Firestore: beroperasi dalam mode cache offline.');
-          } else {
-            console.warn('Firestore messages listener notice:', err.message);
-          }
+          console.warn('Firestore detail_transaksi listener notice:', err.message);
         }
       );
-      unsubs.push(unsubMsg);
+      unsubs.push(unsubDetail);
+
+      // Messages listener (real-time) + notifikasi toast untuk pesan baru
+      //
+      // Aturan Firestore menolak query yang bisa mengembalikan dokumen yang tidak boleh dibaca,
+      // jadi non-admin tidak boleh membaca seluruh koleksi. Kasir memakai 3 query terpisah
+      // (siaran, ditujukan ke saya, dikirim oleh saya) yang hasilnya digabung.
+      const myUid = currentUser.uid;
+      const isAdminUser = currentUser.role === 'admin';
+      const msgSources = new Map<string, MessageItem[]>();
+
+      const publishMessages = () => {
+        const merged = new Map<string, MessageItem>();
+        msgSources.forEach((list) => list.forEach((m) => merged.set(m.id, m)));
+        setMessages(
+          Array.from(merged.values()).sort((a, b) => String(a.waktu).localeCompare(String(b.waktu)))
+        );
+      };
+
+      const notifyIncoming = (m: MessageItem) => {
+        if (m.id_pengirim === myUid) return; // pesan sendiri
+        if (m.id_penerima != null && m.id_penerima !== myUid) return; // bukan untuk saya
+        if (m.sudah_dibaca) return;
+        if (notifiedMsgIds.current.has(m.id)) return;
+        notifiedMsgIds.current.add(m.id);
+        if (activePageRef.current === 'chat') return; // sedang membuka halaman chat
+        const preview = m.isi_pesan
+          ? `: "${m.isi_pesan.length > 40 ? m.isi_pesan.slice(0, 40) + '…' : m.isi_pesan}"`
+          : m.attachment_name
+          ? ': 📎 lampiran'
+          : '';
+        showToast(`Pesan baru dari ${m.nama_pengirim || 'Staf'}${preview}`, 'info');
+      };
+
+      const listenMessages = (key: string, q: Query) => {
+        let firstSnapshot = true;
+        const unsub = onSnapshot(
+          q,
+          (snap) => {
+            if (!isMounted) return;
+            msgSources.set(
+              key,
+              snap.docs.map((d) => ({ id: d.id, ...d.data() } as MessageItem))
+            );
+            // Snapshot pertama = riwayat; hanya dokumen yang BARU ditambahkan setelahnya yang dinotifikasi.
+            if (!firstSnapshot) {
+              snap.docChanges().forEach((change) => {
+                if (change.type === 'added' && !change.doc.metadata.hasPendingWrites) {
+                  notifyIncoming({ id: change.doc.id, ...change.doc.data() } as MessageItem);
+                }
+              });
+            }
+            firstSnapshot = false;
+            publishMessages();
+          },
+          (err) => {
+            if (err.code === 'unavailable' || err.message?.includes('offline')) {
+              console.info('ℹ️ Messages Firestore: beroperasi dalam mode cache offline.');
+            } else {
+              console.warn('Firestore messages listener notice:', err.message);
+            }
+          }
+        );
+        unsubs.push(unsub);
+      };
+
+      const messagesRef = collection(firestore, 'messages');
+      if (isAdminUser) {
+        listenMessages('all', query(messagesRef));
+      } else {
+        listenMessages('broadcast', query(messagesRef, where('id_penerima', '==', null)));
+        listenMessages('to-me', query(messagesRef, where('id_penerima', '==', myUid)));
+        listenMessages('from-me', query(messagesRef, where('id_pengirim', '==', myUid)));
+      }
 
       // Settings listener
       const unsubSettings = onSnapshot(
@@ -591,7 +757,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     id: string,
     status: 'selesai' | 'pending_verifikasi' | 'dibatalkan'
   ) => {
-    setTransaksiList((prev) =>
+    setTransaksiRaw((prev) =>
       prev.map((t) => (t.id === id ? { ...t, status } : t))
     );
 
@@ -607,7 +773,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateBuktiQRIS = async (id: string, url: string) => {
-    setTransaksiList((prev) =>
+    setTransaksiRaw((prev) =>
       prev.map((t) => (t.id === id ? { ...t, url_bukti_qris: url, status: 'selesai' } : t))
     );
 
@@ -748,7 +914,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Apakah pesan ini belum dibaca oleh user yang sedang login?
+  const isMessageUnread = useCallback(
+    (m: MessageItem): boolean => {
+      if (!currentUser) return false;
+      if (m.id_pengirim === currentUser.uid) return false;
+      if (m.id_penerima == null) {
+        // Siaran: status baca disimpan per-user di perangkat
+        if (broadcastRead.uid !== currentUser.uid) return false;
+        return m.waktu > broadcastRead.since && !broadcastRead.ids.includes(m.id);
+      }
+      if (m.id_penerima === currentUser.uid) return !m.sudah_dibaca;
+      return false;
+    },
+    [currentUser, broadcastRead]
+  );
+
   const markMessageAsRead = async (messageId: string) => {
+    const target = messages.find((m) => m.id === messageId);
+    if (!target || !currentUser) return;
+
+    // Siaran: tandai hanya untuk user ini (tidak menulis ke Firestore)
+    if (target.id_penerima == null) {
+      setBroadcastRead((prev) =>
+        prev.ids.includes(messageId)
+          ? prev
+          : { ...prev, ids: [...prev.ids, messageId].slice(-500) }
+      );
+      return;
+    }
+
+    if (target.sudah_dibaca || target.id_penerima !== currentUser.uid) return;
+
     setMessages((prev) =>
       prev.map((m) => (m.id === messageId ? { ...m, sudah_dibaca: true } : m))
     );
@@ -763,12 +960,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const unreadCount = messages.filter(
-    (m) =>
-      !m.sudah_dibaca &&
-      m.id_pengirim !== currentUser?.uid &&
-      (m.id_penerima === null || m.id_penerima === currentUser?.uid)
-  ).length;
+  const unreadCount = useMemo(
+    () => messages.filter(isMessageUnread).length,
+    [messages, isMessageUnread]
+  );
 
   // Settings Actions
   const updateSettings = async (newSettings: Partial<StoreSettings>) => {
@@ -803,7 +998,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         settings,
         cart,
         activePage,
-        isFirebaseActive: isFirebaseConfigured,
+        isFirebaseActive: isFirebaseConfigured && isOnline && serverLive,
         toasts,
         selectedChatTransactionId,
         setActivePage,
@@ -830,6 +1025,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateUserStatus,
         sendMessage,
         markMessageAsRead,
+        isMessageUnread,
         unreadCount,
         updateSettings,
       }}
